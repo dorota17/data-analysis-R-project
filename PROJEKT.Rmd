@@ -1,0 +1,404 @@
+---
+title: "Projekt"
+author: "Dorota Więcek"
+output: html_document
+---
+
+# Temat:
+Poziom kształtowania się współczynnika dzietności na poszczególnych kontynentach i czynniki wpływające na jego wysokość oraz czynniki wpływające na śmiertelność dzieci.
+
+# Zmienne:
+
+wsp_dzietnosci - współczynnik dzietności, określający przeciętną liczbę dzieci, które urodziłaby kobieta w ciągu całego okresu rozrodczego przy założeniu, że w poszczególnych fazach tego okresu rodziłaby z intensywnością obserwowaną wśród kobiet w badanym roku;
+
+smiertelnosc_dzieci - śmiertelność dzieci poniżej 5 roku życia na 1000 żywych urodzeń;
+
+przychod_na_osobe - PKB per kapita w dolarach międzynarodowych (cena ustalona na 2017 rok). Dane są korygowane o inflację i różnice w kosztach życia między krajami, znane jako dolary PPP;
+
+oczek_dl_zycia - średnia długość życia w danej populacji (średnia liczba lat, którą powinien przeżyć noworodek przy obecnym wzorcu śmiertelności);
+
+wsp_urbanizacji - procent ludzi żyjących na obszarach miejskich;
+
+lata_nauki_kobiety - średnia liczba lat edukacji wśród kobiet w wieku rozrodczym (15-44 lat) uwzględniając podstawowe, średnie i wyższe kształcenie;
+
+szczepienia - odsetek jednolatków, którzy zostali zaszczepieni przynajmniej jedną z następujących szczepionek: BCD (przeciw gruźlicy), DTP3 (przeciw tężcowi), HepB3 (przeciw wzw B), HIB3 (przeciw pałeczce hemofilnej), Melases 1st (przeciw odrze), PCV3 (przeciwko pneumokokom), Pol3 (przeciw Poliomyelitis), RotaC (przeciw rotawirusom);
+
+liczba_kcal - spożycie jedzenia w kilokaloriach na osobę na dzień (normalnie wynosi 1500-3000 kcal).
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(tidyr)
+library(dplyr)
+library(cowplot)
+library(ggplot2)
+library(countrycode)
+library(ggpubr)
+library(jcolors)
+
+wsp_dzietnosci <- read.csv(file = "C:/Users/HP/Downloads/children_per_woman_total_fertility.csv", sep=",")
+smiertelnosc_dzieci <- read.csv(file = "C:/Users/HP/Downloads/child_mortality_0_5_year_olds_dying_per_1000_born.csv", sep=",")
+przychod_na_osobe <- read.csv(file = "C:/Users/HP/Downloads/income_per_person_gdppercapita_ppp_inflation_adjusted.csv", sep=",")
+lata_nauki_kobiety <- read.csv(file = "C:/Users/HP/Downloads/mean_years_in_school_women_of_reproductive_age_15_to_44.csv", sep=",")
+wsp_urbanizacji <- read.csv(file = "C:/Users/HP/Downloads/urban_population_percent_of_total.csv", sep=",")
+oczek_dl_zycia <- read.csv(file = "C:/Users/HP/Downloads/life_expectancy_years.csv", sep=",")
+szczepienia <- read.csv(file = "C:/Users/HP/Downloads/vacc_rate.csv", sep=",")
+liczba_kcal <- read.csv(file = "C:/Users/HP/Downloads/food_supply_kilocalories_per_person_and_day.csv", sep=",")
+
+p<- gather(wsp_dzietnosci, year, wsp_dzietnosci, -country)
+q<- gather(smiertelnosc_dzieci, year, smiertelnosc_dzieci, -country)
+r<- gather(przychod_na_osobe, year, przychod_na_osobe, -country)
+s<- gather(oczek_dl_zycia, year, oczek_dl_zycia, -country)
+t<- gather(wsp_urbanizacji, year, wsp_urbanizacji, -country)
+u<- gather(lata_nauki_kobiety, year, lata_nauki_kobiety, -country)
+w<- gather(szczepienia, year, szczepienia, -country)
+x<- gather(liczba_kcal, year, liczba_kcal, -country)
+
+mergeCols <- c("year", "country")
+tab1 <- inner_join(p, q, by=mergeCols)
+tab2 <- inner_join(tab1, r, by=mergeCols)
+tab3 <- inner_join(tab2, s, by=mergeCols)
+tab4 <- inner_join(tab3, t, by=mergeCols)
+tab5 <- inner_join(tab4, u, by=mergeCols) 
+tab6 <- inner_join(tab5, w, by=mergeCols)
+tabela <- inner_join(tab6, x, by=mergeCols)
+
+tabela$year <- gsub('X','',tabela$year)
+tabela <- tabela %>%
+  filter(tabela$year %in% c(seq(1980, 2008, 2)))
+
+dane <- tabela %>%
+  mutate(kontynent = countrycode(country, origin = "country.name",destination = "continent")) %>%
+  rename(rok = year) %>%
+  rename(kraj = country)
+
+dane$przychod_na_osobe = as.numeric(gsub("k", "e3", dane$przychod_na_osobe))
+
+dane <- subset(dane, wsp_dzietnosci != "NA" |  smiertelnosc_dzieci != "NA" | oczek_dl_zycia!= "NA" | wsp_urbanizacji!= "NA" | lata_nauki_kobiety!= "NA") #nie usuwam na razie braków danych z dwóch kolumn: "liczba_kcal" i "szczepienia", ponieważ w tych kolumnach jest zdecydowanie więcej braków danych i doprowadziłoby to do utraty wielu danych z pozostałych kolumn; dane z tych dwóch kolumn oczyszczę kiedy będe pracować bezpośrednio na nich
+```
+```{r}
+str(dane)
+head(dane)
+```
+
+# Hipoteza 1
+**Czy im wyższy jest średni współczynnik urbanizacji dla danego kontynentu, tym niższy jest średni współczynnik dzietności?**
+```{r message=FALSE, warning=FALSE}
+dzietnosc_kontynenty <- dane %>%
+  filter(kontynent!="Oceania")%>%
+  select(kraj, rok, wsp_dzietnosci, kontynent) %>%
+  group_by(rok, kontynent) %>%
+  summarize(wsp_dzietnosci_sr = mean(wsp_dzietnosci)) 
+plot_dzietnosc <- dzietnosc_kontynenty %>%
+  ggplot( aes(x = rok, 
+              y = wsp_dzietnosci_sr, 
+              group = kontynent, 
+              color = kontynent)) +
+  geom_line(size = 1.2) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(y = "współczynnik dzietności", 
+       title="Średni współczynnik dzietności",
+       subtitle = "w latach 1980-2008")
+
+urbanizacja_kontynenty <- dane %>%
+  filter(kontynent!="Oceania") %>%
+  select(kraj, rok, wsp_urbanizacji, kontynent) %>%
+  group_by(rok, kontynent) %>%
+  summarize(wsp_urbanizacji_sr = mean(wsp_urbanizacji)) 
+plot_urbanizacja <- urbanizacja_kontynenty %>%
+  ggplot( aes(x = rok, 
+              y = wsp_urbanizacji_sr, 
+              group = kontynent, 
+              color = kontynent)) +
+  geom_line(size = 1.2) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90, hjust=1)) +
+  labs(y = "współczynnik urbanizacji", 
+       title="Średni współczynnik urbanizacji",
+       subtitle = "w latach 1980-2008") 
+
+ggarrange(plot_urbanizacja, plot_dzietnosc, ncol=2, nrow=1, common.legend = TRUE, legend="right")
+```
+
+Dla każdego z kontynentów na przestrzeni lat wraz ze wzrostem współczynnika urbanizacji współczynnik dzietność maleje (jedynie w Europie po roku 2002 współczynnik dzietności delikatnie wzrasta). W Europie, gdzie współczynnik urbanizacji jest najwyższy, dzietność jest najniższa, natomiast w Afryce, gdzie współczynnik urbanizacji jest najniższy, dzietność jest najwyższa.
+
+Współczynnik urbanizacji zmnijesza się wraz ze wzrostem współczynnika dzietności, m.in. dlatego, że mieszkanie w mieście zwiększa koszty wychowywania dzieci. Mieszkania miejskie są droższe, a dzieci nie są tak potrzebne do utrzymania gospodarstw domowych jak na obszarach miejskich, gdzie np. pomajają w uprawie roślin i hodowli zwierząt. Ponadto urbanizacja może wiązać się ze zmianą przekonań i postaw dotyczących rodzin wielodzietnych. Oprócz tego mieszkańcy miast mogą mieć lepszy dostęp do nowoczesnej kontroli urodzeń.
+
+# Hipoteza 2
+**Czy wraz ze wzrostem oczekiwanej długości życia mediana współczynnika dzietności maleje?**
+```{r message=FALSE, warning=FALSE}
+sprawdzanie <- function(oczek_dl_zycia){
+  if(oczek_dl_zycia < 50){
+    return("<50") 
+  } else if (oczek_dl_zycia >= 50 & oczek_dl_zycia <= 70){ 
+    return("między 50 a 70") 
+  }  else {
+    return(">70")
+  }
+}
+oczekiwana_dl_zycia <- sapply(dane$oczek_dl_zycia, sprawdzanie)
+dane_dl_zycia <- cbind(dane, oczekiwana_dl_zycia)
+dane_dl_zycia$oczekiwana_dl_zycia <- factor(dane_dl_zycia$oczekiwana_dl_zycia , levels=c("<50", "między 50 a 70", ">70"))
+dane_dl_zycia %>% 
+  ggplot() +
+  geom_boxplot(aes(x = oczekiwana_dl_zycia,
+                   y = wsp_dzietnosci),
+               fill= "darkslategray2") +
+  ylim (0.5,8) +
+  labs(title = "Współczynnik dzietności a oczekiwana długość życia",
+       caption = "Dane z lat 1980-2008",
+       x = "oczekiwana długość życia" ,
+       y = "współczynnik dzietności") +
+  theme_bw()
+```
+
+Tak, im większa oczekiwana długość życia tym mniejsza mediana współczynnika dzietności. 
+
+Jest to spowodowane m.in. faktem, że oczekiwana długość życia jest najwyższa w krajach wysoko rozwiniętych, z szeroko dostępną opieką medyczną i edukacją zdrowotną, a co za tym idzie jest tam lepszy dostep do leków, w tym różnych metod antykoncepcji oraz społeczeństwo jest wyedukowane w zakresie planowania rodziny, co wpływa na spadek dzietności.
+
+# Hipoteza 3
+**Czy istnieje ujemna korelacja między współczynnikiem dzietności a średnią liczbą lat edukacji wśród kobiet?**
+```{r message=FALSE, warning=FALSE}
+dzietnosc<- dane %>%
+  filter(kontynent!="Oceania")%>%
+  select(kraj, rok, wsp_dzietnosci, kontynent) %>%
+  group_by(kontynent) %>%
+  summarize(wsp_dzietnosci = mean(wsp_dzietnosci)) 
+
+edukacja <- dane %>%
+  filter(kontynent!="Oceania")%>%
+  select(kraj, rok, lata_nauki_kobiety, kontynent) %>%
+  group_by(kontynent) %>%
+  summarize(lata_nauki_kobiety = mean(lata_nauki_kobiety)) 
+
+dzietnosc_edukacja <- inner_join(edukacja, dzietnosc)
+ggplot(dzietnosc_edukacja, mapping = aes(x = lata_nauki_kobiety, 
+                                         y = wsp_dzietnosci,
+                                         color = kontynent)) +
+  geom_point(size = 4.5) +
+  labs(x = "przeciętna liczba lat edukacji kobiet", 
+       y = "współczynnik dzietności", 
+       title="Współczynnik dzietności a przeciętna liczba lat edukacji kobiet",
+       caption = "Średnia z lat 1980-2008")+
+  scale_color_brewer(palette = "Dark2") +
+  theme_bw() +
+  geom_smooth(method = "lm", se = FALSE, col = "grey55")
+```
+
+Istnieje silna ujemna korelacja między współczynnikiem dzietności a przeciętną liczbą lat edukacji wśród kobiet. 
+
+Jest to spowodowane m.in. faktem, że kobiety, które stawiają na edukację i rozwój, decydują się na dzieci później, przez co rodzą ich mniej lub w ogóle się na nie nie decydują, bo np. stawiają rozwój zawodowy ponad posiadaniem dzieci. Kobiety lepiej wykształcone posiadają również większą wiedzę na temat antykoncepcji i planowania rodziny.
+
+# Hipoteza 4
+**Czy wraz ze wzrostem przychodu na osobę współczynnik dzietności maleje? Czy zależność tych dwóch czynników wygląda tak samo w 1980 i 2008 roku?**
+```{r message=FALSE, warning=FALSE}
+dane %>%
+  filter(rok %in% c(1980, 2008)) %>%
+  ggplot(mapping = aes(x = przychod_na_osobe, 
+                       y = wsp_dzietnosci,
+                       color = kontynent)) +
+  geom_point(size = 2) +
+  labs(x = "przychód na osobę", 
+       y = "współczynnik dzietności", 
+       title="Współczynnik dzietności a przychód na osobę")+
+  theme_bw() +
+  geom_smooth(se = FALSE, color = "grey30") + 
+  facet_grid(rows = vars(rok))
+```
+
+W roku 1980, w miarę jak przychód na osobę rośnie, wskaźnik dzietności spada do pewnego momentu, a następnie zdecydowanie rośnie. Natomiast w roku 2008 wraz ze wzrostem przychodu dzietność cały czas maleje lub utrzymuje się na podobnym poziomie.
+
+W krajach z niskim PKB dzietność jest wysoka, ponieważ ludzie pracują tam głównie w sektorze rolniczym/przemysłowym lub nie są nigdzie zatrudnieni i żyją z tego co wyhodują, dlatego potrzebują dzieci do pomocy w utrzymaniu gospodarstwa domowego. Natomiast w krajach z wysokim PKB, gdzie większość ludzi pracuje w usługach, liczy się nie ilość lecz "jakość" dzieci. Rodzice chcą zapewnić dzieciom edukację, aby w przyszłości poradziły sobie na rynku pracy, dlatego inwestują w mniej, za to lepiej wykształconych dzieci.
+
+# Hipoteza 5
+**Czy na kontynentach gdzie spożywa się średnio ponad 3000kcal dziennie (czyli zdecydowanie więcej niż rekomendowane 2000-2500kcal) średni współczynnik dzietności jest niższy niż 2.1 (czyli współczynnik zapewniający zastępowalność pokoleń)?**
+```{r message=FALSE, warning=FALSE}
+kcal_dzietnosc <- dane %>%
+  select(rok, kraj, wsp_dzietnosci, liczba_kcal, kontynent) %>%
+  filter(kontynent != "Oceania" & rok >= 1992) #przed tym rokiem występuje bardzo dużo braków w danych
+kcal_dzietnosc <- subset(kcal_dzietnosc, liczba_kcal != "NA") #nie oczyściłam tej zmiennej z braków danych na początku, więc robię to teraz
+kcal_kontynenty <- kcal_dzietnosc %>%
+  group_by(kontynent) %>%
+  summarize(liczba_kcal_sr = mean(liczba_kcal))
+
+kcal_kontynenty$liczba_kcal_norm <- (kcal_kontynenty$liczba_kcal_sr - 3000)
+kcal_kontynenty$kcal_typ <- ifelse(kcal_kontynenty$liczba_kcal_norm < 0, "poniżej", "powyżej")
+kcal_kontynenty <- kcal_kontynenty[order(kcal_kontynenty$liczba_kcal_norm), ]
+kcal_kontynenty$kontynent <- factor(kcal_kontynenty$kontynent, levels = kcal_kontynenty$kontynent) 
+kcal_wykres <- ggplot(kcal_kontynenty, 
+                      aes(x=kontynent, 
+                          y=liczba_kcal_norm)) + 
+  geom_col(aes(fill = kcal_typ), width=.5)  +
+  scale_fill_manual(name="Spożycie kilokalorii", 
+                    labels = c("Poniżej 3000kcal", "Powyżej 3000kcal"), 
+                    values = c("powyżej"="red", "poniżej"="green")) + 
+  labs(title= "Średnie dzienne spożycie kcal",
+       caption = "Średnia z lat 1992-2008",
+       subtitle="w stosunku do 3000 kcal", 
+       y = "dzienne spożycie kilokalorii",
+       x = "") + 
+  geom_hline(yintercept = 0) +
+  theme_bw()+ 
+  scale_y_continuous(limits = c(-750, 250)) +
+  coord_flip()
+
+dzietnosc_kontynenty <- kcal_dzietnosc %>%
+  group_by(kontynent) %>%
+  summarize(wsp_dzietnosci_sr = mean(wsp_dzietnosci))
+
+dzietnosc_kontynenty$dzietnosc_kontynenty_norm <- (dzietnosc_kontynenty$wsp_dzietnosci_sr - 2.1)  
+dzietnosc_kontynenty$dzietnosc_typ <- ifelse(dzietnosc_kontynenty$dzietnosc_kontynenty_norm < 0, "poniżej", "powyżej")  
+dzietnosc_kontynenty <- dzietnosc_kontynenty[order(-dzietnosc_kontynenty$dzietnosc_kontynenty_norm), ]  
+dzietnosc_kontynenty$kontynent <- factor(dzietnosc_kontynenty$kontynent, levels = dzietnosc_kontynenty$kontynent) 
+dzietnosc_wykres <- ggplot(dzietnosc_kontynenty, 
+                           aes(x=kontynent, 
+                               y=dzietnosc_kontynenty_norm)) + 
+  geom_col(aes(fill = dzietnosc_typ), width=.5)  +
+  scale_fill_manual(name="Dzietność", 
+                    labels = c("Poniżej 2.1", "Powyżej 2.1"), 
+                    values = c("powyżej"="green", "poniżej"="red")) + 
+  labs(title= "Średni współczynnik dzietności",
+       subtitle="w stosunku do 2.1 dzieci", 
+       caption = "Średnia z lat 1992-2008",
+       y = "współczynnik dzietności",
+       x = "") + 
+  geom_hline(yintercept = 0) +
+  theme_bw() +
+  scale_y_continuous(limits = c(-1, 3.3)) +
+  coord_flip()
+
+plot_grid(kcal_wykres, dzietnosc_wykres, labels = NULL)
+```
+
+Dzietność na kontynentach gdzie przeciętne dzienne spożycie kcal jest ponieżej 3000, jest większa niż 2.1 - występuje tam zastępowalność pokoleń. Natomiast w Europie gdzie dzienne spożycie kcal to średnio ponad 3000 - dzietność jest niższa niż 2.1. 
+
+Jest to spowodowane m.in. faktem, że nadmierne spożycie prowadzi do nadwagi i otyłości oraz innych chorób, które negatywnie oddziałują na płodność; wysokie spożycie kilokalorii świadczy także o dobrobycie i o konsumpcyjnym stylu życia w Europie, ludzie są tam przyzwyczajeni do określonego poziomu konsumpcji nie tylko pożywienia, ale i innych dóbr i nie chcą go obniżać na rzecz wydatków na wychowanie dziecka, dlatego nie decydują się na dzieci lub mają ich mniej.
+
+# Hipoteza 6
+**Czy istnieje dodatnia korelacja między współczynnikiem dzietności a współczynnikiem śmiertelności dzieci? Czy występuje ona w Afryce, Amerykach, Azji i Europie i czy istnieje zarówno w 1980 jak i 2008 roku?**
+```{r message=FALSE, warning=FALSE}
+filter(dane, rok%in%c(1980, 2008) & kontynent != "Oceania") %>%
+  ggplot(aes(x = wsp_dzietnosci, 
+             y = smiertelnosc_dzieci, 
+             col = kontynent)) +
+  scale_color_brewer(palette = "Set2") +
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE, col = "gray35") +
+  labs(x = "współczynnik dzietności", 
+       y = "śmiertelność dzieci na 1000 żywych urodzeń", 
+       title="Współczynnik dzietności a śmiertelność dzieci") +
+  theme_bw()+
+  theme(legend.position = "none") +   
+  facet_grid(rok~kontynent)
+```
+
+Istnieje dodatnia korelacja między tymi zmiennymi. W miarę jak rośnie dzietność, rośnie również wskaźnik śmiertelności dzieci. Zależność ta w 1980 roku występuje we wszystkich kontynentach natomiast w 2008 jest ona słabsza, i występuje we wszystkich kontynentach oprócz Europy.
+
+Korelacja ta jest spowodowana m.in. faktem, że niższa dzietność może zmniejszyć śmiertelność dzieci, działając na takie potencjalne czynniki zwiększające śmiertelność dzieci jak: wyczerpanie matek związane z ciążami i laktacją, rywalizacja rodzeństwa o ograniczone zasoby rodzinne i opiekę matki (w tym karmienie piersią) oraz przenoszenie infekcji w środowiskach zatłoczonych przez dzieci.
+W 2008 ta zależność jest mniej widoczna, m.in. dlatego, że w ciągu 28 lat rozwinęła się opieka medyczna.
+
+# Hipoteza 7
+**Czy w Europie odsetek jednolatków zaszczepionych przynajmniej jedną szczepionką jest wyższy niż w Afryce? Czy dla obu kontynentów istnieje ujemna korelacja między tymi zmiennymi?** 
+```{r message=FALSE, warning=FALSE}
+szczepienia_smiertelnosc <- dane %>%
+  select(rok, kraj, szczepienia, smiertelnosc_dzieci, kontynent) %>%
+  subset(szczepienia != "NA")
+
+szczepienia_Afr <- szczepienia_smiertelnosc %>%
+  filter(kontynent == "Africa") %>%
+  select(szczepienia)
+```
+
+Średni odsetek zaszczepionych jednolatków w Afryce:
+```{r}
+mean(szczepienia_Afr$szczepienia)
+```
+Mediana odsetka zaszczepionych jednolatków w Afryce:
+```{r}
+median(szczepienia_Afr$szczepienia)
+```
+Odchylenie standardowe odsetka zaszczepionych jednolatków w Afryce:
+```{r}
+sd(szczepienia_Afr$szczepienia)
+```
+
+Współczynnik korelacji Pearsona między odsetkiem zaszczepionych jednolatków a wskaźnikiem śmiertelności dzieci dla Afryki:
+```{r}
+szczepienia_smiertelnosc_Afr <- szczepienia_smiertelnosc %>%
+  filter(kontynent == "Africa") %>%
+  select(szczepienia, smiertelnosc_dzieci)
+cor(szczepienia_smiertelnosc_Afr$szczepienia, szczepienia_smiertelnosc_Afr$smiertelnosc_dzieci, method = "pearson")
+```
+
+```{r}
+szczepienia_Eu <- szczepienia_smiertelnosc %>%
+  filter(kontynent == "Europe") %>%
+  select(szczepienia)
+```
+Średni odsetek zaszczepionych jednolatków w Europie:
+```{r}
+mean(szczepienia_Eu$szczepienia)
+```
+Mediana odsetka zaszczepionych jednolatków w Europie:
+```{r}
+median(szczepienia_Eu$szczepienia)
+```
+Odchylenie standardowe odsetka zaszczepionych jednolatków w Europie:
+```{r}
+sd(szczepienia_Eu$szczepienia)
+```
+
+Współczynnik korelacji Pearsona między odsetkiem zaszczepionych jednolatków a wskaźnikiem śmiertelności dzieci dla Europy:
+```{r}
+szczepienia_smiertlenosc_Eu <- szczepienia_smiertelnosc %>%
+  filter(kontynent == "Europe") %>%
+  select(szczepienia, smiertelnosc_dzieci)
+cor(szczepienia_smiertlenosc_Eu$szczepienia, szczepienia_smiertlenosc_Eu$smiertelnosc_dzieci, method = "pearson")
+```
+
+Wnioski:
+Średni odsetek jednolatków zaszczepionych przynajmniej jedną szczepionką wynosi w Europie 95% i jest to więcej niż w Afryce, gdzie wynosi 77%. Również mediana odsetka zaszczepionych jednolatków jest w Europie wyższa niż w Afryce (Europa: 97%, Afryka: 85%). Dla obu kontynentów mediana jest wyższa niż średnia, jednak szczególnie widać to w Afryce. Oznacza to, że prawdopodobnie kilka krajów z wyjątkowo niskim procentem zaszczepienia zaniża średnią. Odchylenie standardowe dla Europy wynosi 6, natomiast dla Afryki aż 22. Oznacza to, że dane między różnymi krajami w Afryce są bardziej zrożnicowane wokół średniej.
+
+W Afryce istnieje umiarkowana ujemna korelacja między odsetkiem zaszczepionych jednolatków a śmiertelnością dzieci, ponieważ choroby zakaźne są tam główną przyczyną zgonów, a szczepienia sa najlepszą metodą zapobiegania im. Narażenie na choroby zakaźne jest tam znacznie większe, m.in z powodu klimatu, kryzysów humanitarnych i przeludnienia.
+
+W Europie korelacja między odsetkiem zaszczepionych jednolatków a śmiertelnością dzieci jest praktycznie zerowa, ponieważ choroby zakaźne nie są tu główną przyczyną śmiertelności. Zaszczepienie społeczeństwa jest na tyle wysokie, że zapewnia odporność zbiorową, wskaźniki zaszczepienia mało odchylają się od średniej, na całym kontynencie są na podobnym wysokim poziomie. W Europie jest też większa świadomość zdrowotna.
+
+# Hipoteza 8
+**Czy dynamika spadku współczynnika dzietności w Chinach różni się od dynamiki spadku średniego współczynnika dzietności dla całego kontynentu azjatyckiego?**
+```{r message=FALSE, warning=FALSE}
+dzietnosc_azja<- dane %>%
+  filter(kontynent=="Asia")%>%
+  select(rok, wsp_dzietnosci, kontynent) %>%
+  group_by(rok, kontynent) %>%
+  summarize(wsp_dzietnosci = mean(wsp_dzietnosci)) 
+
+dzietnosc_chiny <- dane %>%
+  select(kraj, rok, wsp_dzietnosci) %>%
+  filter(kraj == "China") %>%
+  group_by(rok)
+
+dzietnosc_chiny$group <- "Chiny"
+dzietnosc_azja$group <- "Azja"
+
+dzietnosc_porownanie <- rbind(dzietnosc_azja, dzietnosc_chiny)
+dzietnosc_porownanie <- dzietnosc_porownanie %>%
+  select(wsp_dzietnosci, group)
+
+ggplot(dzietnosc_porownanie, aes(x=rok, 
+                          y=wsp_dzietnosci, 
+                          group=group, 
+                          col = group)) +
+  labs(title = "Średni współczynnik dzietności w Azji, a współczynnik dzietności w Chinach",
+       subtitle = "w latach 1980 - 2008",
+       y = "współczynnik dzietności") + 
+  theme_bw() +
+  theme(legend.title = element_blank()) +
+  ylim(1,5) +
+  scale_color_jcolors() +
+  geom_line(size = 1.2)
+```
+
+W Azji współczynnik dzietności między rokiem 1980 a 2008 cały czas równomiernie spadał w miarę jak kontynent rozwijał się społecznie i gospodarczo, natomiast w Chinach w latach 1980-1990 utrzymywał się na poziomie około 2.5, w roku 1990 nastąpił jego znaczny spadek, a od roku 1996 znowu utrzymywał się na mniej więcej tym samym poziomie, czyli ok. 1.5.
+
+Do tego spadku w Chinach przyczyniła się m.in. wprowadzona w 1980 roku polityka jednego dziecka. Na początku została ona w miarę skutecznie wprowadzona w środowiskach miejskich, natomiast na obszarach wiejskich tradycyjne rolnicze rodziny wielopokoleniowe, opierały się jej. Ponadto egzekwowanie tej polityki było na początku najsilniejsze w miastach i łagodniejsze na wsi. Początkowo polityka ta nie obowiązywała również mniejszości narodowych i etnicznych. 
+
+Dopiero w 1990 roku polityka jednego dziecka wraz z innymi czynnikami doprowadziły do spadku dzietności w Chinach. Współczynnik dzietności nigdy nie osiągnął poziomu 1.0, lecz ustabilizował się na poziomie 1.5, ponieważ zawsze znajdowali się ludzie, którzy mieli więcej niż 1 dziecko, ponieważ zdecydowali się złamać to prawo, zapłacili za zgodę na posiadanie 2 dziecka lub otrzymali zgodę na posiadanie 2 dziecka z racji tego, że np. pierwsze było dziewczynką lub osobą z niepełnosprawnością.
